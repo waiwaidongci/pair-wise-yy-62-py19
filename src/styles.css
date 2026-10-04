@@ -110,13 +110,22 @@ body { margin: 0; min-width: 320px; background: #eef2f0; }
 .print-deck small { color: var(--muted); font-size: 8px; margin-top: 5px; }
 .print-deck b { position: absolute; right: 5px; bottom: 5px; background: #c26b2a; color: white; border-radius: 3px; font-size: 8px; padding: 2px 4px; }
 .print-signatures { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; margin-top: 35px; padding-top: 17px; border-top: 1px solid var(--line); font-size: 11px; }
+.weigh-grid { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 14px; align-items: start; }
+.station-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 5px; background: #fafcfb; }
+.queue-line { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px dashed #d9c9a8; border-radius: 5px; background: #fffaf0; }
+.queue-chip { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 10px; background: #f3e3c3; color: #7a5a1e; font-size: 10px; font-weight: 700; }
+.weigh-cargo-pick { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; padding: 10px; border: 1px solid var(--line); border-radius: 5px; background: #fafcfb; }
+.verdict-banner { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding: 11px 13px; border-radius: 6px; font-size: 12px; }
+.verdict-banner.ok { color: #14584a; background: #e4f3ec; border: 1px solid #b7ddcb; }
+.verdict-banner.hold { color: #8e3b30; background: #fdeceb; border: 1px solid #f2c4bd; }
+.verdict-banner span { color: inherit; opacity: .82; }
 
 @media (max-width: 1200px) {
   .stowage-grid { grid-template-columns: 260px minmax(460px, 1fr); }
   .stowage-grid > :last-child { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 }
 @media (max-width: 900px) {
-  .overview-grid, .stowage-grid, .compare-grid { grid-template-columns: 1fr; }
+  .overview-grid, .stowage-grid, .compare-grid, .weigh-grid { grid-template-columns: 1fr; }
   .stowage-grid > :last-child { grid-column: auto; display: grid; }
   .comments-grid { grid-template-columns: 1fr 1fr; }
 }

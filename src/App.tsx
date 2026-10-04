@@ -45,6 +45,7 @@ import {
   IconRefresh,
   IconRulerMeasure,
   IconRoute,
+  IconScale,
   IconShip,
   IconUsers
 } from '@tabler/icons-react';
@@ -55,20 +56,29 @@ import {
   acceptLimit,
   addComment,
   calculateStability,
+  completeReview,
   detectConflicts,
+  failBatchSave,
   lockPlan,
   moveCargo,
+  queuePosition,
   rejectComment,
+  retryBatchSave,
   selectCargo,
   setViewMode,
   store,
+  submitWeighBatch,
+  unweighedCargo,
   updateLashing,
+  weighNextContainer,
+  WEIGH_TOLERANCE_PCT,
   type RootState
 } from './store';
 
 const nav = [
   { path: '/', label: '航次总览', icon: <IconShip size={17} /> },
   { path: '/stowage', label: '配载与货位', icon: <IconLayoutBoardSplit size={17} /> },
+  { path: '/weighing', label: '复磅与重量依据', icon: <IconScale size={17} /> },
   { path: '/compare', label: '方案对比', icon: <IconHistory size={17} /> },
   { path: '/print', label: '配载图与清单', icon: <IconPrinter size={17} /> }
 ];
@@ -223,10 +233,12 @@ function Overview() {
   const dispatch = useDispatch();
   const stability = calculateStability(state.cargo);
   const conflicts = detectConflicts(state.cargo);
+  const unweighed = unweighedCargo(state);
   const active = state.cargo.find((item) => item.id === state.activeCargoId) ?? state.cargo[0];
   return <div className="page">
-    <PageHeading eyebrow={`${data?.id ?? 'V-2609-17'} / 航次审阅`} title="多用途船舶配载校核" description={`${data?.vessel ?? '海岳轮'} · ${data?.route ?? '上海 → 釜山 → 温哥华'} · 计划离港 ${data?.departure ?? '10-02 14:00'}`} actions={<><Button variant="default" leftSection={<IconRefresh size={16} />} onClick={() => dispatch(setViewMode(state.viewMode === '3d' ? 'section' : '3d'))}>{state.viewMode === '3d' ? '二维剖面' : '三维视角'}</Button><Button color="teal" leftSection={<IconLock size={16} />} disabled={conflicts.length > 0 || state.locked} onClick={() => dispatch(lockPlan())}>{state.locked ? '方案已锁定' : '锁定配载版本'}</Button></>} />
+    <PageHeading eyebrow={`${data?.id ?? 'V-2609-17'} / 航次审阅`} title="多用途船舶配载校核" description={`${data?.vessel ?? '海岳轮'} · ${data?.route ?? '上海 → 釜山 → 温哥华'} · 计划离港 ${data?.departure ?? '10-02 14:00'}`} actions={<><Button variant="default" leftSection={<IconRefresh size={16} />} onClick={() => dispatch(setViewMode(state.viewMode === '3d' ? 'section' : '3d'))}>{state.viewMode === '3d' ? '二维剖面' : '三维视角'}</Button><Button color="teal" leftSection={<IconLock size={16} />} disabled={conflicts.length > 0 || state.locked || unweighed.length > 0} onClick={() => dispatch(lockPlan())}>{state.locked ? '方案已锁定' : unweighed.length > 0 ? '未复磅不可锁定' : '锁定配载版本'}</Button></>} />
     {conflicts.length > 0 && <div className="warning-banner"><IconAlertTriangle size={18} /><strong>{conflicts.length} 项配载冲突待处理</strong><span>{conflicts.map((item) => item.title).join('、')}</span></div>}
+    {unweighed.length > 0 && <div className="warning-banner"><IconScale size={18} /><strong>{unweighed.length} 票货物未复磅</strong><span>申报值与码头复磅差异未闭环，按重量依据要求不能锁定放行：{unweighed.map((item) => item.bill).join('、')}</span></div>}
     <SimpleGrid cols={{ base: 2, lg: 4 }} spacing="sm" mb="md">{[
       ['总货重', `${stability.total.toFixed(1)} t`, '设计上限 3560 t', 'ok'],
       ['稳性裕度', `${stability.stability.toFixed(1)}%`, stability.stability > 70 ? '符合航次要求' : '低于控制线', stability.stability > 70 ? 'ok' : 'bad'],
@@ -236,7 +248,7 @@ function Overview() {
     <div className="overview-grid">
       <Card padding={0} className="scene-card"><div className="panel-title"><div><strong>{state.viewMode === '3d' ? '三维货位与航次分布' : '舱内横向剖面'}</strong><Text size="xs" c="dimmed">货箱颜色对应目的港与货类</Text></div><Badge color="teal" variant="light">方案 V{state.planRevision}</Badge></div>{state.viewMode === '3d' ? <ThreeHold /> : <SectionView />}</Card>
       <Stack gap="sm">
-        <Card padding="md"><div className="panel-title"><div><strong>当前货位</strong><Text size="xs" c="dimmed">{active.id}</Text></div><Badge color={active.hazmat !== '无' ? 'orange' : 'gray'}>{active.hazmat === '无' ? '普通货' : '危险品'}</Badge></div><Stack gap={6} mt="sm"><Text fw={700}>{active.bill} · {active.type}</Text><Text size="xs" c="dimmed">{active.dimension}</Text><SimpleGrid cols={2} spacing="xs"><div className="mini-stat"><span>重量</span><strong>{active.weight} t</strong></div><div className="mini-stat"><span>卸货港</span><strong>{active.port}</strong></div><div className="mini-stat"><span>货位</span><strong>Bay {active.bay} / Row {active.row} / Tier {active.tier}</strong></div><div className="mini-stat"><span>绑扎</span><strong>{active.lashing}</strong></div></SimpleGrid></Stack></Card>
+        <Card padding="md"><div className="panel-title"><div><strong>当前货位</strong><Text size="xs" c="dimmed">{active.id}</Text></div><Group gap={6}><Badge color={active.weighStatus === '已复磅' ? 'teal' : 'red'} variant="light">{active.weighStatus}</Badge><Badge color={active.hazmat !== '无' ? 'orange' : 'gray'}>{active.hazmat === '无' ? '普通货' : '危险品'}</Badge></Group></div><Stack gap={6} mt="sm"><Text fw={700}>{active.bill} · {active.type}</Text><Text size="xs" c="dimmed">{active.dimension}</Text><SimpleGrid cols={2} spacing="xs"><div className="mini-stat"><span>采用重量{active.weight !== active.declaredWeight ? '（复磅值）' : '（申报值）'}</span><strong>{active.weight} t</strong></div><div className="mini-stat"><span>卸货港</span><strong>{active.port}</strong></div><div className="mini-stat"><span>货位</span><strong>Bay {active.bay} / Row {active.row} / Tier {active.tier}</strong></div><div className="mini-stat"><span>绑扎</span><strong>{active.lashing}</strong></div></SimpleGrid></Stack></Card>
         <Card padding="md"><div className="panel-title"><div><strong>重量分布</strong><Text size="xs" c="dimmed">按横向货位统计</Text></div><IconRulerMeasure size={18} /></div><div className="weight-bars">{[2, 4, 6, 8, 10, 12, 14].map((bay) => { const weight = state.cargo.filter((item) => item.bay === bay).reduce((sum, item) => sum + item.weight, 0); return <div key={bay}><span>{weight.toFixed(0)}t</span><i style={{ height: `${Math.max(8, weight / 1.2)}px` }} /><small>B{bay}</small></div>; })}</div></Card>
         <Card padding="md"><div className="panel-title"><div><strong>角色限制条件</strong><Text size="xs" c="dimmed">{state.comments.filter((item) => item.status === '待确认').length} 项待确认</Text></div><IconUsers size={18} /></div>{state.comments.slice(0, 3).map((comment) => <div className="limit-row" key={comment.id}><div><Text size="xs" fw={700}>{comment.author} · {comment.role}</Text><Text size="xs" c="dimmed">{comment.content}</Text></div><Badge size="xs" color={comment.status === '待确认' ? 'orange' : 'teal'}>{comment.status}</Badge></div>)}</Card>
       </Stack>
@@ -271,9 +283,55 @@ function Stowage() {
   </div>;
 }
 
+function Weighing() {
+  const state = useSelector((root: RootState) => root.stowage);
+  const dispatch = useDispatch();
+  const stability = calculateStability(state.cargo);
+  const conflicts = detectConflicts(state.cargo);
+  const unweighed = unweighedCargo(state);
+  const [terminal, setTerminal] = useState('终端 A');
+  const [batchNo, setBatchNo] = useState('');
+  const [selected, setSelected] = useState<string[]>([]);
+  const suggested = `WB-${String(state.weighBatches.length + 1).padStart(3, '0')}`;
+  const outOfTolerance = state.weighRecords.filter((item) => !item.withinTolerance);
+  const queued = state.weighBatches.filter((item) => item.status === '排队中');
+  const blocking = conflicts.filter((item) => item.level === 'high');
+  const lashingRecheck = state.cargo.filter((item) => item.lashing === '需复核');
+  const canRelease = unweighed.length === 0 && blocking.length === 0;
+  const submit = () => {
+    const cargoIds = selected.length ? selected : unweighed.map((item) => item.id);
+    dispatch(submitWeighBatch({ batchNo: batchNo.trim() || suggested, terminal, cargoIds }));
+    setSelected([]);
+    setBatchNo('');
+  };
+  return <div className="page">
+    <PageHeading eyebrow="WEIGHT EVIDENCE / 复磅闭环" title="复磅批次与重量依据" description={`货物、复磅批次、称重设备与配载放行串联 · 容差 ±${WEIGH_TOLERANCE_PCT}% · 超容差以复磅值为准`} actions={<Button color="teal" leftSection={<IconCheck size={16} />} disabled={unweighed.length > 0 || state.draftReview === '已复核'} onClick={() => dispatch(completeReview())}>{state.draftReview === '已复核' ? '复核已登记' : '补录复核'}</Button>} />
+    {state.upgradeNotice && <div className="warning-banner"><IconAlertTriangle size={18} /><strong>草稿已升级 · 复核{state.draftReview}</strong><span>{state.upgradeNotice}</span></div>}
+    <SimpleGrid cols={{ base: 2, lg: 4 }} spacing="sm" mb="md">{[
+      ['复磅进度', `${state.cargo.length - unweighed.length} / ${state.cargo.length} 票`, unweighed.length ? '未复磅不能锁定' : '全部复磅完成', unweighed.length ? 'bad' : 'ok'],
+      ['超容差箱', `${outOfTolerance.length} 箱`, '已按复磅值采用', outOfTolerance.length ? 'bad' : 'ok'],
+      ['排队批次', `${queued.length} 批`, '称重台容量不足自动排队', 'ok'],
+      ['终端冲突', `${state.terminalConflicts.length} 起`, '后到提交内容已保留', state.terminalConflicts.length ? 'bad' : 'ok']
+    ].map((item) => <Card key={item[0]} padding="md" className="metric-card"><Text size="xs" c="dimmed">{item[0]}</Text><Text fw={800} fz={23} mt={3}>{item[1]}</Text><Text size="xs" c={item[3] === 'bad' ? 'red' : 'teal'}>{item[2]}</Text></Card>)}</SimpleGrid>
+    <div className="weigh-grid">
+      <Stack gap="sm">
+        <Card padding="md"><div className="panel-title"><div><strong>称重台状态</strong><Text size="xs" c="dimmed">容量不足时批次自动排队</Text></div><IconScale size={18} /></div><Stack gap="xs" mt="sm">{state.stations.map((station) => <div className="station-row" key={station.id}><div><Text size="sm" fw={700}>{station.name}</Text><Text size="xs" c="dimmed">同时可容 {station.capacity} 批 · {station.occupiedBy.length ? `占用中：${station.occupiedBy.join('、')}` : '空闲'}</Text></div><Badge color={station.occupiedBy.length >= station.capacity ? 'orange' : 'teal'} variant="light">{station.occupiedBy.length >= station.capacity ? '满载' : '可用'}</Badge></div>)}{queued.length > 0 && <div className="queue-line"><Text size="xs" c="dimmed">等待队列</Text><Group gap={6}>{queued.map((batch) => <span className="queue-chip" key={batch.batchNo}>{batch.batchNo} · 第 {queuePosition(state, batch.batchNo)} 位</span>)}</Group></div>}</Stack></Card>
+        <Card padding="md"><div className="panel-title"><div><strong>提交复磅批次</strong><Text size="xs" c="dimmed">两个终端提交同一批号时先到者占用</Text></div><IconBoxMultiple size={18} /></div><Stack gap="sm" mt="sm"><Group grow><Select label="提交终端" data={['终端 A', '终端 B']} value={terminal} onChange={(value) => value && setTerminal(value)} /><TextInput label="批次号" placeholder={suggested} value={batchNo} onChange={(event) => setBatchNo(event.currentTarget.value)} /></Group><div className="weigh-cargo-pick">{state.cargo.map((item) => <Checkbox key={item.id} size="xs" disabled={item.weighStatus === '已复磅'} checked={selected.includes(item.id)} onChange={(event) => setSelected(event.currentTarget.checked ? [...selected, item.id] : selected.filter((id) => id !== item.id))} label={`${item.bill} · 申报 ${item.declaredWeight}t${item.weighStatus === '已复磅' ? '（已复磅）' : ''}`} />)}</div><Text size="xs" c="dimmed">不勾选则默认纳入全部未复磅货物；输入已存在的批次号可模拟第二终端冲突提交。</Text><Button color="teal" onClick={submit} disabled={!unweighed.length && !selected.length}>提交批次（{batchNo.trim() || suggested}）</Button></Stack></Card>
+        {state.terminalConflicts.length > 0 && <Card padding="md" className="conflict-card"><div className="panel-title"><div><strong>终端冲突留存</strong><Text size="xs" c="dimmed">后到提交内容保留待处理</Text></div><IconAlertTriangle size={18} /></div>{state.terminalConflicts.map((item) => <div className="conflict-row" key={item.id}><Badge size="xs" color="orange">冲突</Badge><div><strong>{item.batchNo} · {item.terminal} · {item.submittedAt}</strong><span>{item.note} 涉及 {item.cargoIds.join('、')}</span></div></div>)}</Card>}
+      </Stack>
+      <Stack gap="sm">
+        <Card padding={0}><div className="panel-title"><div><strong>复磅批次</strong><Text size="xs" c="dimmed">逐箱称重 · 保存失败可从最后完成箱恢复</Text></div><Badge variant="light">{state.weighBatches.length} 批</Badge></div><Table verticalSpacing="sm"><Table.Thead><Table.Tr><Table.Th>批次</Table.Th><Table.Th>终端</Table.Th><Table.Th>状态</Table.Th><Table.Th>进度</Table.Th><Table.Th>操作</Table.Th></Table.Tr></Table.Thead><Table.Tbody>{state.weighBatches.map((batch) => { const position = queuePosition(state, batch.batchNo); const station = state.stations.find((item) => item.id === batch.stationId); return <Table.Tr key={batch.batchNo}><Table.Td fw={700}>{batch.batchNo}<Text size="xs" c="dimmed">{station ? station.name : '未占台'}</Text></Table.Td><Table.Td>{batch.terminal}</Table.Td><Table.Td><Badge size="sm" color={batch.status === '称重中' ? 'teal' : batch.status === '已完成' ? 'green' : batch.status === '保存失败' ? 'red' : 'orange'}>{batch.status}{position ? ` · 第 ${position} 位` : ''}</Badge></Table.Td><Table.Td><Progress size="sm" color={batch.status === '保存失败' ? 'red' : 'teal'} value={(batch.completedCargoIds.length / Math.max(batch.cargoIds.length, 1)) * 100} /><Text size="xs" c="dimmed" mt={2}>{batch.completedCargoIds.length}/{batch.cargoIds.length} 箱</Text></Table.Td><Table.Td><Group gap={6} wrap="nowrap"><Button size="compact-xs" color="teal" disabled={batch.status !== '称重中'} onClick={() => dispatch(weighNextContainer(batch.batchNo))}>称重下一箱</Button><Button size="compact-xs" variant="default" disabled={batch.status !== '称重中'} onClick={() => dispatch(failBatchSave(batch.batchNo))}>模拟保存失败</Button>{batch.status === '保存失败' && <Button size="compact-xs" color="orange" onClick={() => dispatch(retryBatchSave(batch.batchNo))}>从第 {batch.completedCargoIds.length + 1} 箱恢复</Button>}</Group></Table.Td></Table.Tr>; })}{!state.weighBatches.length && <Table.Tr><Table.Td colSpan={5}><Text size="sm" c="dimmed" ta="center" py="md">尚无复磅批次，请在左侧提交。</Text></Table.Td></Table.Tr>}</Table.Tbody></Table></Card>
+        <Card padding={0}><div className="panel-title"><div><strong>复磅记录与采用值</strong><Text size="xs" c="dimmed">超出 ±{WEIGH_TOLERANCE_PCT}% 容差以复磅值为准</Text></div><IconFileDescription size={18} /></div><Table verticalSpacing="sm"><Table.Thead><Table.Tr><Table.Th>货物</Table.Th><Table.Th>申报</Table.Th><Table.Th>复磅</Table.Th><Table.Th>偏差</Table.Th><Table.Th>采用值</Table.Th><Table.Th>批次 / 台位</Table.Th></Table.Tr></Table.Thead><Table.Tbody>{state.weighRecords.map((record) => { const cargo = state.cargo.find((item) => item.id === record.cargoId); return <Table.Tr key={record.cargoId}><Table.Td fw={700}>{cargo?.bill ?? record.cargoId}</Table.Td><Table.Td>{record.declaredWeight} t</Table.Td><Table.Td>{record.verifiedWeight} t</Table.Td><Table.Td><Text span c={record.withinTolerance ? 'teal' : 'red'} fw={700}>{record.deviationPct > 0 ? '+' : ''}{record.deviationPct}%</Text></Table.Td><Table.Td><Badge size="sm" color={record.withinTolerance ? 'gray' : 'teal'} variant="light">{record.withinTolerance ? '申报值' : `复磅值 ${record.verifiedWeight}t`}</Badge></Table.Td><Table.Td><Text size="xs">{record.batchNo} · {record.stationId} · {record.weighedAt}</Text></Table.Td></Table.Tr>; })}{!state.weighRecords.length && <Table.Tr><Table.Td colSpan={6}><Text size="sm" c="dimmed" ta="center" py="md">尚无复磅记录。</Text></Table.Td></Table.Tr>}</Table.Tbody></Table></Card>
+        <Card padding="md"><div className="panel-title"><div><strong>重量改动即时结论</strong><Text size="xs" c="dimmed">复磅写入后立即重算稳性、绑扎与放行</Text></div><IconAnchor size={18} /></div><SimpleGrid cols={4} spacing="xs" mt="sm"><div className="mini-stat"><span>总货重</span><strong>{stability.total.toFixed(1)} t</strong></div><div className="mini-stat"><span>稳性裕度</span><strong>{stability.stability.toFixed(1)}%</strong></div><div className="mini-stat"><span>纵倾</span><strong>{stability.trim}</strong></div><div className="mini-stat"><span>绑扎待复核</span><strong>{lashingRecheck.length} 票</strong></div></SimpleGrid>{lashingRecheck.length > 0 && <Text size="xs" c="orange" mt="sm">绑扎需复核：{lashingRecheck.map((item) => item.bill).join('、')}</Text>}<div className={`verdict-banner ${canRelease ? 'ok' : 'hold'}`}><strong>{canRelease ? '满足放行条件' : '暂缓放行'}</strong><span>{canRelease ? '全部货物已复磅，重量依据闭环，可进入锁定与打印。' : `${unweighed.length ? `${unweighed.length} 票未复磅` : ''}${unweighed.length && blocking.length ? ' · ' : ''}${blocking.length ? `${blocking.length} 项阻断冲突` : ''}`}</span></div></Card>
+      </Stack>
+    </div>
+  </div>;
+}
+
 function Compare() {
   const state = useSelector((root: RootState) => root.stowage);
   const stability = calculateStability(state.cargo);
+  const unweighed = unweighedCargo(state);
   const changed = state.cargo.filter((item) => item.id === 'BL-88247' || item.id === 'BL-88219' || item.id === 'BL-88240');
   const [acceptOpen, setAcceptOpen] = useState(false);
   const dispatch = useDispatch();
@@ -286,7 +344,7 @@ function Compare() {
       ['BL-88219', '绑扎', '待绑扎', '需复核', '危险品隔离边界调整'],
       ['BL-88240', 'Tier', 'Tier 1', 'Tier 2', '降低舱内底层局部载荷']
     ].map((row) => <Table.Tr key={row[0]}><Table.Td>{row[0]}</Table.Td><Table.Td>{row[1]}</Table.Td><Table.Td><Text c="red" td="line-through">{row[2]}</Text></Table.Td><Table.Td><Text c="teal" fw={700}>{row[3]}</Text></Table.Td><Table.Td><Text size="xs">{row[4]}</Text></Table.Td><Table.Td><Checkbox label="接受" defaultChecked /></Table.Td></Table.Tr>)}</Table.Tbody></Table></Card>
-    <Modal opened={acceptOpen} onClose={() => setAcceptOpen(false)} title="形成配载审阅结论" centered><Stack><Text size="sm" c="dimmed">接受后生成新的只读版本并保留船长、码头和货主意见。锁定前仍可退回修改。</Text>{['重大件绑扎后由甲板部复核', '危险品隔离线在配载图中明确标注', '釜山卸货顺序不得改变'].map((limit) => <Checkbox key={limit} label={limit} checked={state.acceptedLimits.includes(limit)} onChange={() => dispatch(acceptLimit(limit))} />)}<Button color="teal" disabled={state.acceptedLimits.length < 3} onClick={() => { dispatch(lockPlan()); setAcceptOpen(false); }}>接受并锁定 V{state.planRevision + 1}</Button></Stack></Modal>
+    <Modal opened={acceptOpen} onClose={() => setAcceptOpen(false)} title="形成配载审阅结论" centered><Stack><Text size="sm" c="dimmed">接受后生成新的只读版本并保留船长、码头和货主意见。锁定前仍可退回修改。</Text>{unweighed.length > 0 && <Text size="sm" c="red">尚有 {unweighed.length} 票货物未复磅，按重量依据要求不能锁定。</Text>}{['重大件绑扎后由甲板部复核', '危险品隔离线在配载图中明确标注', '釜山卸货顺序不得改变'].map((limit) => <Checkbox key={limit} label={limit} checked={state.acceptedLimits.includes(limit)} onChange={() => dispatch(acceptLimit(limit))} />)}<Button color="teal" disabled={state.acceptedLimits.length < 3 || unweighed.length > 0} onClick={() => { dispatch(lockPlan()); setAcceptOpen(false); }}>接受并锁定 V{state.planRevision + 1}</Button></Stack></Modal>
   </div>;
 }
 
@@ -294,6 +352,9 @@ function PrintPlan() {
   const { data } = useGetVoyageQuery();
   const state = useSelector((root: RootState) => root.stowage);
   const stability = calculateStability(state.cargo);
+  const unweighed = unweighedCargo(state);
+  const blocking = detectConflicts(state.cargo).filter((item) => item.level === 'high');
+  const canRelease = unweighed.length === 0 && blocking.length === 0;
   const dispatch = useDispatch();
   return <div className="page print-page">
     <PageHeading eyebrow="STOWAGE PLAN / PRINT" title="配载图与卸货清单" description="面向船长、码头和理货人员打印，包含重量分布和危险品标记。" actions={<><Button variant="default" leftSection={<IconPlayerPlay size={16} />} onClick={() => dispatch(setViewMode(state.viewMode === '3d' ? 'section' : '3d'))}>预览剖面</Button><Button color="teal" leftSection={<IconPrinter size={16} />} onClick={() => window.print()}>打印配载包</Button></>} />
@@ -304,6 +365,9 @@ function PrintPlan() {
       <div className="print-deck">{Array.from({ length: 28 }).map((_, index) => { const row = index % 4; const bay = 4 + Math.floor(index / 4); const item = state.cargo.find((cargo) => cargo.deck === '主甲板' && cargo.bay === bay && cargo.row === row); return <div key={index} className={item ? 'filled' : ''} style={item ? { borderTopColor: item.color } : undefined}><span>{item ? item.bill.slice(-3) : ''}</span><small>{item ? `${item.weight}t` : `B${bay}/R${row}`}</small>{item?.hazmat !== '无' && item && <b>DG</b>}</div>; })}</div>
       <h3>卸货顺序与绑扎清单</h3>
       <Table striped><Table.Thead><Table.Tr><Table.Th>顺序</Table.Th><Table.Th>提单号</Table.Th><Table.Th>货位</Table.Th><Table.Th>货类</Table.Th><Table.Th>重量</Table.Th><Table.Th>卸货港</Table.Th><Table.Th>危险品 / 绑扎</Table.Th></Table.Tr></Table.Thead><Table.Tbody>{[...state.cargo].sort((a, b) => (a.port === '釜山' ? -1 : 1) - (b.port === '釜山' ? -1 : 1)).map((item, index) => <Table.Tr key={item.id}><Table.Td>{index + 1}</Table.Td><Table.Td fw={700}>{item.bill}</Table.Td><Table.Td>B{item.bay}/R{item.row}/T{item.tier}</Table.Td><Table.Td>{item.type}</Table.Td><Table.Td>{item.weight} t</Table.Td><Table.Td>{item.port}</Table.Td><Table.Td><Badge size="xs" color={item.hazmat !== '无' ? 'orange' : 'gray'}>{item.hazmat}</Badge> <Text span size="xs">{item.lashing}</Text></Table.Td></Table.Tr>)}</Table.Tbody></Table>
+      <h3>重量依据与放行结论</h3>
+      <Table striped><Table.Thead><Table.Tr><Table.Th>提单号</Table.Th><Table.Th>申报重量</Table.Th><Table.Th>复磅重量</Table.Th><Table.Th>偏差</Table.Th><Table.Th>采用值</Table.Th><Table.Th>复磅批次 / 台位</Table.Th></Table.Tr></Table.Thead><Table.Tbody>{state.cargo.map((item) => { const record = state.weighRecords.find((entry) => entry.cargoId === item.id); return <Table.Tr key={item.id}><Table.Td fw={700}>{item.bill}</Table.Td><Table.Td>{item.declaredWeight} t</Table.Td><Table.Td>{record ? `${record.verifiedWeight} t` : '—'}</Table.Td><Table.Td>{record ? <Text span c={record.withinTolerance ? 'teal' : 'red'} fw={700}>{record.deviationPct > 0 ? '+' : ''}{record.deviationPct}%</Text> : '—'}</Table.Td><Table.Td>{record ? <Badge size="xs" color={record.withinTolerance ? 'gray' : 'teal'} variant="light">{record.withinTolerance ? `申报值 ${item.weight}t` : `复磅值 ${item.weight}t`}</Badge> : <Badge size="xs" color="red" variant="light">未复磅</Badge>}</Table.Td><Table.Td><Text size="xs">{record ? `${record.batchNo} · ${record.stationId}` : '—'}</Text></Table.Td></Table.Tr>; })}</Table.Tbody></Table>
+      <div className={`verdict-banner ${canRelease ? 'ok' : 'hold'}`}><strong>放行结论：{canRelease ? '同意放行' : '暂缓放行'}</strong><span>容差 ±{WEIGH_TOLERANCE_PCT}% · 超容差以复磅值为准 · 复核状态：{state.draftReview}{unweighed.length ? ` · ${unweighed.length} 票未复磅` : ''}{blocking.length ? ` · ${blocking.length} 项阻断冲突` : ''}</span></div>
       <div className="print-signatures"><div>配载负责人：____________</div><div>船长确认：____________</div><div>码头代表：____________</div><div>日期：2026-09-29</div></div>
     </Card>
   </div>;
@@ -320,5 +384,5 @@ function Shell({ children }: { children: ReactNode }) {
 }
 
 export default function App() {
-  return <BrowserRouter><Shell><Routes><Route path="/" element={<Overview />} /><Route path="/stowage" element={<Stowage />} /><Route path="/compare" element={<Compare />} /><Route path="/print" element={<PrintPlan />} /><Route path="*" element={<Navigate to="/" replace />} /></Routes></Shell></BrowserRouter>;
+  return <BrowserRouter><Shell><Routes><Route path="/" element={<Overview />} /><Route path="/stowage" element={<Stowage />} /><Route path="/weighing" element={<Weighing />} /><Route path="/compare" element={<Compare />} /><Route path="/print" element={<PrintPlan />} /><Route path="*" element={<Navigate to="/" replace />} /></Routes></Shell></BrowserRouter>;
 }
