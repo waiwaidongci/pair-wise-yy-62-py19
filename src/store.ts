@@ -1,5 +1,6 @@
 import { configureStore, createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import { stowageApi, type Cargo, type CargoType } from './api';
+import { weighReducer } from './weigh';
 
 export type StowageComment = {
   id: string;
@@ -22,16 +23,20 @@ type State = {
 };
 
 const initialCargo: Cargo[] = [
-  { id: 'BL-88214', bill: 'SEA-88214', type: '集装箱', bay: 12, row: 4, tier: 2, deck: '主甲板', weight: 24.6, dimension: '40 × 8 × 8.6 ft', port: '温哥华', hazmat: '无', lashing: '已绑扎', color: '#2b7c75' },
-  { id: 'BL-88219', bill: 'SEA-88219', type: '集装箱', bay: 13, row: 4, tier: 2, deck: '主甲板', weight: 28.1, dimension: '40 × 8 × 8.6 ft', port: '温哥华', hazmat: 'UN 1263', lashing: '需复核', color: '#c77835' },
-  { id: 'BL-88231', bill: 'SEA-88231', type: '集装箱', bay: 10, row: 6, tier: 1, deck: '主甲板', weight: 18.2, dimension: '20 × 8 × 8.6 ft', port: '釜山', hazmat: '无', lashing: '已绑扎', color: '#366d94' },
-  { id: 'BL-88240', bill: 'SEA-88240', type: '集装箱', bay: 8, row: 2, tier: 2, deck: '货舱', weight: 31.4, dimension: '40 × 8 × 8.6 ft', port: '温哥华', hazmat: '无', lashing: '待绑扎', color: '#6d528d' },
-  { id: 'BL-88247', bill: 'SEA-88247', type: '重大件', bay: 15, row: 0, tier: 1, deck: '主甲板', weight: 112.5, dimension: '18.4 × 4.2 × 4.8 m', port: '温哥华', hazmat: '无', lashing: '需复核', color: '#b64f49' },
-  { id: 'BL-88254', bill: 'SEA-88254', type: '散货', bay: 5, row: 0, tier: 0, deck: '货舱', weight: 286.0, dimension: '散装 / 420 m³', port: '釜山', hazmat: '无', lashing: '已绑扎', color: '#9a7836' }
+  { id: 'BL-88214', bill: 'SEA-88214', type: '集装箱', bay: 12, row: 4, tier: 2, deck: '主甲板', weight: 24.6, declaredWeight: 24.6, dimension: '40 × 8 × 8.6 ft', port: '温哥华', hazmat: '无', lashing: '已绑扎', color: '#2b7c75' },
+  { id: 'BL-88219', bill: 'SEA-88219', type: '集装箱', bay: 13, row: 4, tier: 2, deck: '主甲板', weight: 28.1, declaredWeight: 28.1, dimension: '40 × 8 × 8.6 ft', port: '温哥华', hazmat: 'UN 1263', lashing: '需复核', color: '#c77835' },
+  { id: 'BL-88231', bill: 'SEA-88231', type: '集装箱', bay: 10, row: 6, tier: 1, deck: '主甲板', weight: 18.2, declaredWeight: 18.2, dimension: '20 × 8 × 8.6 ft', port: '釜山', hazmat: '无', lashing: '已绑扎', color: '#366d94' },
+  { id: 'BL-88240', bill: 'SEA-88240', type: '集装箱', bay: 8, row: 2, tier: 2, deck: '货舱', weight: 31.4, declaredWeight: 31.4, dimension: '40 × 8 × 8.6 ft', port: '温哥华', hazmat: '无', lashing: '待绑扎', color: '#6d528d' },
+  { id: 'BL-88247', bill: 'SEA-88247', type: '重大件', bay: 15, row: 0, tier: 1, deck: '主甲板', weight: 112.5, declaredWeight: 112.5, dimension: '18.4 × 4.2 × 4.8 m', port: '温哥华', hazmat: '无', lashing: '需复核', color: '#b64f49' },
+  { id: 'BL-88254', bill: 'SEA-88254', type: '散货', bay: 5, row: 0, tier: 0, deck: '货舱', weight: 286.0, declaredWeight: 286.0, dimension: '散装 / 420 m³', port: '釜山', hazmat: '无', lashing: '已绑扎', color: '#9a7836' }
 ];
 
 const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('yy62-stowage-plan') : null;
 const saved = raw ? JSON.parse(raw) : null;
+// 旧存档迁移：补 declaredWeight（申报值）字段
+if (saved?.cargo) {
+  saved.cargo = saved.cargo.map((item: Cargo) => ({ ...item, declaredWeight: item.declaredWeight ?? item.weight }));
+}
 const initialState: State = saved ?? {
   cargo: initialCargo,
   activeCargoId: 'BL-88247',
@@ -77,19 +82,34 @@ const slice = createSlice({
       if (!state.acceptedLimits.includes(action.payload)) state.acceptedLimits.push(action.payload);
     },
     setViewMode(state, action: PayloadAction<'3d' | 'section'>) { state.viewMode = action.payload; },
-    lockPlan(state) { state.locked = true; state.planRevision += 1; }
+    lockPlan(state) { state.locked = true; state.planRevision += 1; },
+    // 复磅生效：超出容差的箱子以复磅值为准，立即成为新的放行重量依据
+    applyReweigh(state, action: PayloadAction<{ id: string; reweighWeight: number; tolerance: number }>) {
+      const cargo = state.cargo.find((item) => item.id === action.payload.id);
+      if (!cargo) return;
+      const deviation = Math.abs(action.payload.reweighWeight - cargo.declaredWeight) / cargo.declaredWeight;
+      if (deviation > action.payload.tolerance) {
+        cargo.weight = action.payload.reweighWeight;
+        state.planRevision += 1;
+        state.draftSavedAt = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+      }
+    }
   }
 });
 
-export const { selectCargo, moveCargo, updateLashing, addComment, acceptComment, rejectComment, acceptLimit, setViewMode, lockPlan } = slice.actions;
+export const { selectCargo, moveCargo, updateLashing, addComment, acceptComment, rejectComment, acceptLimit, setViewMode, lockPlan, applyReweigh } = slice.actions;
 
 export const store = configureStore({
-  reducer: { stowage: slice.reducer, [stowageApi.reducerPath]: stowageApi.reducer },
+  reducer: { stowage: slice.reducer, weigh: weighReducer, [stowageApi.reducerPath]: stowageApi.reducer },
   middleware: (getDefault) => getDefault().concat(stowageApi.middleware)
 });
 
 store.subscribe(() => {
-  if (typeof localStorage !== 'undefined') localStorage.setItem('yy62-stowage-plan', JSON.stringify(store.getState().stowage));
+  if (typeof localStorage !== 'undefined') {
+    const state = store.getState();
+    localStorage.setItem('yy62-stowage-plan', JSON.stringify(state.stowage));
+    localStorage.setItem('yy62-weigh', JSON.stringify(state.weigh));
+  }
 });
 
 export type RootState = ReturnType<typeof store.getState>;
